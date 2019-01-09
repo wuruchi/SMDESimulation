@@ -1,0 +1,272 @@
+---
+title: "Data Preparation Process"
+author: "Wilmer Uruchi"
+date: "12/09/2018"
+output:
+  html_document:
+    fig_height: 4
+    highlight: pygments
+    theme: spacelab
+  pdf_document: 
+    keep_tex: yes
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+## Building the DataSet
+
+First, visualize the current dataset:
+
+```{r visualize Boston}
+load("Boston2017.RData")
+
+```
+
+Using dplyr for some data transformation:
+```{r load_libraries1, message=FALSE}
+library(dplyr)
+library(lubridate)
+library(stringr)
+library(ggplot2)
+```
+
+```{r load_libraries2, message=FALSE}
+library("FactoMineR")
+```
+
+I am going to build the dataset using the imported dataset marathon_results_2017, and selecting the participants between 20 and 60 years old, inclusive, to avoid outliers.
+
+```{r new dataset}
+Boston2017SubSet <- marathon_results_2017 %>%
+  filter(Age >= 20, Age <= 60)
+```
+
+Analyze Data Types:
+```{r}
+str(Boston2017SubSet)
+
+```
+
+Now, I am going to transform some fields so I can use them in the PCA.
+```{r transform}
+Boston2017SubSet <- Boston2017SubSet %>%
+  mutate(X10ktotal = as.numeric(X10K), PaceTotal = as.numeric(Pace), 
+         X5kseconds = as.numeric(difftime(as.POSIXct(X5K, format = '%H:%M:%S'), as.POSIXct('00:00:00', format = '%H:%M:%S'), units = 'secs')),
+         X10kseconds = as.numeric(difftime(as.POSIXct(X10K, format = '%H:%M:%S'), as.POSIXct('00:00:00', format = '%H:%M:%S'), units = 'secs')),
+         PaceSeconds = as.numeric(difftime(as.POSIXct(Pace, format = '%H:%M:%S'), as.POSIXct('00:00:00', format = '%H:%M:%S'), units = 'secs')),
+         OfficialTimeSeconds = as.numeric(difftime(as.POSIXct(Official.Time, format = '%H:%M:%S'), as.POSIXct('00:00:00', format = '%H:%M:%S'), units = 'secs')),
+         BibNumber = str_extract(Bib, "[F]"))
+```
+
+To achieve a homogeneous group, we are not going to include all the professionals into the model since they are expected to have results that are about 3 standard deviations from the mean. 
+
+```{r}
+Boston2017NoPro <- Boston2017SubSet %>%
+  filter(is.na(BibNumber) == TRUE, is.na(OfficialTimeSeconds) == FALSE, is.na(X5kseconds) == FALSE,
+         is.na(X10kseconds) == FALSE)
+```
+
+Another transformation:
+
+```{r}
+Boston2017NoPro <- Boston2017NoPro %>%
+  mutate(BibN = as.numeric(as.character(Bib)))
+Boston2017NoPro <- Boston2017NoPro %>%
+  mutate(GenderN = ifelse(M.F == "M",1,2))
+```
+
+
+## Doing PCA
+
+Now lets look at the PCA of the data collected:
+
+```{r pressure, echo=FALSE}
+Boston2017NoPro.PCA<-Boston2017NoPro[, c("X5kseconds", "Age", "BibN", "GenderN")]
+res<-PCA(Boston2017NoPro.PCA , scale.unit=TRUE, ncp=5, graph = FALSE)
+plot.PCA(res, axes=c(1, 2), choix="ind", habillage="none", col.ind="black", 
+  col.ind.sup="blue", col.quali="magenta", label=c("ind", "ind.sup", "quali"),
+  new.plot=TRUE)
+plot.PCA(res, axes=c(1, 2), choix="var", new.plot=TRUE, col.var="black", 
+  col.quanti.sup="blue", label=c("var", "quanti.sup"), lim.cos2.var=0)
+summary(res, nb.dec = 3, nbelements=10, nbind = 10, ncp = 3, file="")
+```
+
+It looks like these are the variable that should be included in the construction of the model:
+```{r model-construction}
+RegModel.2 <- lm(OfficialTimeSeconds~Age+X5kseconds+BibN+GenderN, 
+  data=Boston2017NoPro)
+summary(RegModel.2)
+```
+
+Distribution of 5k times:
+```{r}
+ggplot(data = Boston2017NoPro, aes(x = X5kseconds)) +
+  geom_histogram()
+Boston2017NoPro %>%
+  summarise(mean_ar = mean(X5kseconds), median = median(X5kseconds), sd_ar = sd(X5kseconds), n = n(), max = max(X5kseconds), min = min(X5kseconds), sd_ar = sd(X5kseconds), iqr_ar = IQR(X5kseconds))
+```
+
+```{r}
+ggplot(data = Boston2017NoPro, aes(x = OfficialTimeSeconds)) +
+  geom_histogram(bins = 30) +
+  labs(y = "runners", x = "time in seconds")
+
+ggplot(data = Boston2017NoPro, aes(x = OfficialTimeSeconds, y = BibN)) +
+  geom_line()
+
+Boston2017NoPro %>%
+  summarise(mean_ar = mean(OfficialTimeSeconds), median = median(OfficialTimeSeconds), sd_ar = sd(OfficialTimeSeconds), n = n(), max = max(X5kseconds), min = min(OfficialTimeSeconds), sd_ar = sd(OfficialTimeSeconds), iqr_ar = IQR(OfficialTimeSeconds))
+```
+
+
+```{r}
+ggplot(regularSim, aes(Num)) + 
+  geom_line(aes(y = OfficialTime, colour = "Official")) + 
+  geom_line(aes(y = Result, colour = "Result")) +
+  ggtitle("Results") +
+  labs(y = 'time')
+
+ggplot(regularSim, aes(x = OfficialTime)) +
+  geom_histogram(bins =30)
+
+ggplot(regularSim, aes(x = Result)) +
+  geom_histogram(bins =30)
+```
+
+```{r}
+R1Sim_Bib.Gender.Age.factors %>%
+  filter(Gender == 2) %>%
+  summarise(mean = mean(Result))
+
+`R3Sim_Bib.Gender+Age.factors` %>%
+  filter(Gender == 1) %>%
+  summarise(mean = mean(Result))
+
+
+meanR1 = mean(R1Sim_Bib.Gender.Age.factors$Result)
+meanR2 = mean(`R2Sim_Bib.Gender.Age+factors`$Result)
+meanR3 = mean(`R3Sim_Bib.Gender+Age.factors`$Result)
+meanR4 = mean(`R4Sim_Bib.Gender+Age+factors`$Result)
+meanR5 = mean(`R5Sim_Bib+Gender.Age.factors`$Result)
+meanR6 = mean(`R6Sim_Bib+Gender.Age+factors`$Result)
+meanR7 = mean(`R7Sim_Bib+Gender+Age.factors`$Result)
+meanR8 = mean(`R8Sim_Bib+Gender+Age+factors`$Result)
+meanR1
+meanR2
+meanR3
+meanR4
+meanR5
+meanR6
+meanR7
+meanR8
+
+e1 = (meanR2 - meanR1 + meanR4 - meanR3 + meanR6 - meanR5 + meanR8 - meanR7)/4
+e1
+e2 = (meanR3 + meanR4 + meanR7 + meanR8 - meanR1 - meanR2 - meanR5 - meanR6)/4
+e2
+e3 = (meanR5 + meanR6 + meanR7 + meanR8 - meanR1 - meanR2 - meanR3 - meanR4)/4
+e3
+```
+
+
+```{r}
+regularSim %>%
+  summarise(mean_sim = mean(Result), mean_his = mean(OfficialTime), sd_sim = sd(Result), sd_his= sd(OfficialTime))
+
+```
+
+<!-- ```{r Export Data} -->
+<!-- Boston2017EmpDistro <- Boston2017NoPro %>% -->
+<!--   select(BibN, GenderN, Age, X5kseconds, OfficialTimeSeconds) -->
+<!-- write.table(Boston2017EmpDistro, "EmpiricalData.txt", sep=",") -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- Boston2017EmpDistro %>% -->
+<!--   summarise(maxAge = max(Boston2017EmpDistro$Age), minAge = min(Boston2017EmpDistro$Age), minBib = min(Boston2017EmpDistro$BibN), maxBib = max(Boston2017EmpDistro$BibN)) -->
+<!-- ``` -->
+
+
+
+<!-- ```{r} -->
+<!-- ggplot(data = log, aes(x = V1)) + -->
+<!--   geom_histogram() -->
+
+<!-- log %>% -->
+<!--   summarise(mean_ar = mean(V1), median = median(V1), sd_ar = sd(V1), n = n(), max = max(V1), min = min(V1), var_ar = var(as.numeric(as.character(V1))), alpha = (mean(V1 * V1))/var_ar, beta = (mean_ar/var_ar)) -->
+
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- ggplot(data = regularSim, aes(x = Result)) + -->
+<!--   geom_histogram() -->
+
+<!-- regularSim %>% -->
+<!--   summarise(mean_ar = mean(Result), median = median(Result), sd_ar = sd(Result), n = n(), max = max(Result), min = min(Result)) -->
+
+<!-- ggplot(data = Boston2017NoPro, aes(x = OfficialTimeSeconds)) + -->
+<!--   geom_histogram() -->
+
+<!-- Boston2017NoPro %>% -->
+<!--   summarise(mean_ar = mean(OfficialTimeSeconds), median = median(OfficialTimeSeconds), sd_ar = sd(OfficialTimeSeconds), n = n(), max = max(OfficialTimeSeconds), min = min(OfficialTimeSeconds)) -->
+
+<!-- ``` -->
+
+<!-- Analyzing Negative Age (20): -->
+<!-- ```{r} -->
+<!-- ggplot(data = ageNegativeSim, aes(x = Result)) + -->
+<!--   geom_histogram() -->
+
+<!-- ageNegativeSim %>% -->
+<!--   summarise(mean_ar = mean(Result), median = median(Result), sd_ar = sd(Result), n = n(), max = max(Result), min = min(Result)) -->
+<!-- ``` -->
+
+<!-- Analyzing Positive Age (60): -->
+<!-- ```{r} -->
+<!-- ggplot(data = agePositiveSim, aes(x = Result)) + -->
+<!--   geom_histogram() -->
+
+<!-- agePositiveSim %>% -->
+<!--   summarise(mean_ar = mean(Result), median = median(Result), sd_ar = sd(Result), n = n(), max = max(Result), min = min(Result)) -->
+<!-- ``` -->
+
+<!-- Analyzing Positive Gender (Male): -->
+<!-- ```{r} -->
+<!-- ggplot(data = genderPositiveSim, aes(x = Result)) + -->
+<!--   geom_histogram() -->
+
+<!-- genderPositiveSim %>% -->
+<!--   summarise(mean_ar = mean(Result), median = median(Result), sd_ar = sd(Result), n = n(), max = max(Result), min = min(Result)) -->
+<!-- ``` -->
+
+<!-- Analyzing Negative Gender (Female): -->
+<!-- ```{r} -->
+<!-- ggplot(data = genderNegativeSim, aes(x = Result)) + -->
+<!--   geom_histogram() -->
+
+<!-- genderNegativeSim %>% -->
+<!--   summarise(mean_ar = mean(Result), median = median(Result), sd_ar = sd(Result), n = n(), max = max(Result), min = min(Result)) -->
+<!-- ``` -->
+
+<!-- Analyzing Positive Bib (31437): -->
+<!-- ```{r} -->
+<!-- ggplot(data = bibPositiveSim, aes(x = Result)) + -->
+<!--   geom_histogram() -->
+
+<!-- bibPositiveSim %>% -->
+<!--   summarise(mean_ar = mean(Result), median = median(Result), sd_ar = sd(Result), n = n(), max = max(Result), min = min(Result)) -->
+<!-- ``` -->
+
+<!-- Analyzing Negative Bib (3): -->
+<!-- ```{r} -->
+<!-- ggplot(data = `R8Sim_Bib+Gender+Age+factors`, aes(x = Result)) + -->
+<!--   geom_histogram() -->
+
+<!-- `R8Sim_Bib+Gender+Age+factors` %>% -->
+<!--   summarise(mean_ar = mean(Result), median = median(Result), sd_ar = sd(Result), n = n(), max = max(Result), min = min(Result)) -->
+<!-- ``` -->
+
