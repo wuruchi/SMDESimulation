@@ -7,6 +7,8 @@ The following is a simulation project of the performance of runners of the Bosto
 
 Although the research that led into this project has been thoroughly performed, it is important to note that this is a 1st Semester Course and there is ample room for improvement. For the most part, this is a introductory project into the practice of Simulation.
 
+Review 2nd_Assignment.pdf for the full report of the project.
+
 Best Regards,
 
 Wilmer
